@@ -70,14 +70,36 @@ def transcribe_with_mlx(audio_path: str, model_size: str) -> Dict[str, Any]:
     }
     
     model_name = mlx_model_map.get(model_size, model_size)
-    return mlx_whisper.transcribe(audio_path, path_or_hf_repo=model_name)
+    # Request just text output without segments/timestamps
+    result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=model_name)
+    
+    # Extract just the text and return a simplified result
+    if "text" in result:
+        text = result["text"]
+        if isinstance(text, str):
+            return {"text": text.strip()}
+        else:
+            return {"text": str(text).strip()}
+    else:
+        return result
 
 def transcribe_with_openai(audio_path: str, model_size: str) -> Dict[str, Any]:
     """Transcribe audio using OpenAI Whisper (CUDA/CPU compatible)."""
     import whisper
     print(f"  Using OpenAI Whisper ({model_size} model)...")
     model = whisper.load_model(model_size)
-    return model.transcribe(audio_path, fp16=False)  # fp16=False for CPU compatibility
+    # Request just text output without segments/timestamps
+    result = model.transcribe(audio_path, fp16=False)  # fp16=False for CPU compatibility
+    
+    # Extract just the text and return a simplified result
+    if "text" in result:
+        text = result["text"]
+        if isinstance(text, str):
+            return {"text": text.strip()}
+        else:
+            return {"text": str(text).strip()}
+    else:
+        return result
 
 def download_youtube_audio(url: str, output_dir: str) -> str:
     """Download audio from YouTube URL and return the path to the WAV file."""
@@ -135,9 +157,13 @@ def extract_text_from_result(result: Dict[str, Any]) -> str:
         return ""
     
     if "text" in result:
-        return result["text"].strip()
+        text = result["text"]
+        if isinstance(text, str):
+            return text.strip()
+        else:
+            return str(text).strip()
     
-    # Extract from segments if available
+    # Fallback: Extract from segments if available (for backward compatibility)
     if "segments" in result:
         return " ".join([segment["text"].strip() for segment in result["segments"]])
     
@@ -158,20 +184,41 @@ def calculate_similarity(text1: str, text2: str) -> float:
 
 def generate_srt_content(result: Dict[str, Any]) -> str:
     """Generate SRT content from transcription result."""
-    if "error" in result or "segments" not in result:
+    if "error" in result:
         return ""
     
-    srt_content = []
-    for i, segment in enumerate(result['segments']):
-        start_time = format_timestamp(segment['start'])
-        end_time = format_timestamp(segment['end'])
-        text = segment['text'].strip()
+    # Since we're now getting just text without segments, create a simple SRT
+    if "text" in result:
+        text = result["text"]
+        if isinstance(text, str):
+            text = text.strip()
+        else:
+            text = str(text).strip()
         
-        srt_content.append(f"{i + 1}")
-        srt_content.append(f"{start_time} --> {end_time}")
-        srt_content.append(f"{text}\n")
+        if text:
+            # Create a single segment with the entire text
+            srt_content = [
+                "1",
+                "00:00:00,000 --> 99:59:59,999",
+                f"{text}\n"
+            ]
+            return "\n".join(srt_content)
     
-    return "\n".join(srt_content)
+    # Fallback: Generate from segments if available (for backward compatibility)
+    if "segments" in result:
+        srt_content = []
+        for i, segment in enumerate(result['segments']):
+            start_time = format_timestamp(segment['start'])
+            end_time = format_timestamp(segment['end'])
+            text = segment['text'].strip()
+            
+            srt_content.append(f"{i + 1}")
+            srt_content.append(f"{start_time} --> {end_time}")
+            srt_content.append(f"{text}\n")
+        
+        return "\n".join(srt_content)
+    
+    return ""
 
 def calculate_word_error_rate(reference: str, hypothesis: str) -> float:
     """Calculate Word Error Rate (WER) between reference and hypothesis."""
@@ -330,37 +377,34 @@ def compare_whisper_models(url: str, output_dir: str, implementation: Optional[s
 
 def print_comparison_report(comparison_data: Dict[str, Any]):
     """Print a detailed comparison report to console."""
-    print("\n" + "="*80)
+    print("\n" + "="*60)
     print("WHISPER MODEL COMPARISON REPORT")
-    print("="*80)
+    print("="*60)
     
     print(f"URL: {comparison_data['url']}")
     print(f"Implementation: {comparison_data['implementation']}")
     print(f"Reference Model: {comparison_data['reference_model']}")
     print(f"Timestamp: {comparison_data['timestamp']}")
     
-    print("\n" + "-"*95)
+    print("\n" + "-"*60)
     print("PERFORMANCE COMPARISON")
-    print("-"*95)
+    print("-"*60)
     
     # Performance table header
-    print(f"{'Model':<8} {'Success':<8} {'Time(s)':<8} {'Words':<8} {'Chars':<8} {'Similarity':<10} {'WER':<8} {'Implementation':<15}")
-    print("-"*95)
+    print(f"{'Model':<8} {'Success':<8} {'Time(s)':<8} {'Similarity':<10} {'Implementation':<15}")
+    print("-"*60)
     
     for model_size, data in comparison_data['models'].items():
         success = "✓" if data['success'] else "✗"
         time_str = f"{data['processing_time']:.1f}" if data['success'] else "N/A"
-        words = data['word_count'] if data['success'] else 0
-        chars = data['char_count'] if data['success'] else 0
         similarity = f"{data.get('similarity_to_reference', 0):.3f}" if data['success'] else "N/A"
-        wer = f"{data.get('word_error_rate', 1):.3f}" if data['success'] else "N/A"
         impl = data.get('implementation_used', 'unknown')
         
-        print(f"{model_size:<8} {success:<8} {time_str:<8} {words:<8} {chars:<8} {similarity:<10} {wer:<8} {impl:<15}")
+        print(f"{model_size:<8} {success:<8} {time_str:<8} {similarity:<10} {impl:<15}")
     
-    print("\n" + "-"*95)
+    print("\n" + "-"*60)
     print("SPEED vs ACCURACY ANALYSIS")
-    print("-"*95)
+    print("-"*60)
     
     successful_models = [(k, v) for k, v in comparison_data['models'].items() if v['success']]
     if len(successful_models) > 1:
