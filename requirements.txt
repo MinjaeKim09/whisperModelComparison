@@ -1,0 +1,21 @@
+# Core dependencies
+yt-dlp>=2023.12.30
+ffmpeg-python>=0.2.0
+
+# Whisper implementations (install based on your platform)
+# For Apple Silicon (M1/M2/M3) - recommended:
+mlx-whisper>=0.10.0
+
+# For CUDA/CPU systems:
+openai-whisper>=20231117
+
+# Optional: For better performance on CUDA systems
+# torch>=2.0.0
+# torchaudio>=2.0.0
+
+# Additional utilities
+python-dateutil>=2.8.0
+pathlib>=1.0.1
+
+# For development/testing
+pytest>=7.0.0 
