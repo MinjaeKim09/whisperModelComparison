@@ -3,8 +3,7 @@
 Whisper Model Comparison Tool
 
 This script transcribes a YouTube video using all available Whisper model sizes
-and provides detailed comparison metrics including transcription quality,
-processing time, and resource usage.
+and provides detailed comparison metrics including processing time and resource usage.
 
 Compatible with both MLX (Apple Silicon) and OpenAI Whisper (CUDA/CPU).
 """
@@ -12,14 +11,10 @@ Compatible with both MLX (Apple Silicon) and OpenAI Whisper (CUDA/CPU).
 import os
 import sys
 import time
-import json
 import argparse
 import uuid
 import yt_dlp
-from pathlib import Path
-from datetime import datetime
 from typing import Dict, List, Tuple, Any, Optional
-import difflib
 
 def get_whisper_implementation():
     """
@@ -47,13 +42,7 @@ def get_whisper_implementation():
     
     return "none"
 
-def format_timestamp(seconds):
-    """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millisecs = int((seconds % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millisecs:03d}"
+
 
 def transcribe_with_mlx(audio_path: str, model_size: str) -> Dict[str, Any]:
     """Transcribe audio using MLX-Whisper (Apple Silicon optimized)."""
@@ -169,88 +158,9 @@ def extract_text_from_result(result: Dict[str, Any]) -> str:
     
     return ""
 
-def calculate_similarity(text1: str, text2: str) -> float:
-    """Calculate similarity between two texts using difflib."""
-    if not text1 or not text2:
-        return 0.0
-    
-    # Normalize texts (lowercase, remove extra spaces)
-    text1_norm = " ".join(text1.lower().split())
-    text2_norm = " ".join(text2.lower().split())
-    
-    # Calculate similarity ratio
-    similarity = difflib.SequenceMatcher(None, text1_norm, text2_norm).ratio()
-    return similarity
 
-def generate_srt_content(result: Dict[str, Any]) -> str:
-    """Generate SRT content from transcription result."""
-    if "error" in result:
-        return ""
-    
-    # Since we're now getting just text without segments, create a simple SRT
-    if "text" in result:
-        text = result["text"]
-        if isinstance(text, str):
-            text = text.strip()
-        else:
-            text = str(text).strip()
-        
-        if text:
-            # Create a single segment with the entire text
-            srt_content = [
-                "1",
-                "00:00:00,000 --> 99:59:59,999",
-                f"{text}\n"
-            ]
-            return "\n".join(srt_content)
-    
-    # Fallback: Generate from segments if available (for backward compatibility)
-    if "segments" in result:
-        srt_content = []
-        for i, segment in enumerate(result['segments']):
-            start_time = format_timestamp(segment['start'])
-            end_time = format_timestamp(segment['end'])
-            text = segment['text'].strip()
-            
-            srt_content.append(f"{i + 1}")
-            srt_content.append(f"{start_time} --> {end_time}")
-            srt_content.append(f"{text}\n")
-        
-        return "\n".join(srt_content)
-    
-    return ""
 
-def calculate_word_error_rate(reference: str, hypothesis: str) -> float:
-    """Calculate Word Error Rate (WER) between reference and hypothesis."""
-    if not reference or not hypothesis:
-        return 1.0
-    
-    ref_words = reference.lower().split()
-    hyp_words = hypothesis.lower().split()
-    
-    # Dynamic programming to calculate edit distance
-    m, n = len(ref_words), len(hyp_words)
-    dp = [[0] * (n + 1) for _ in range(m + 1)]
-    
-    # Initialize base cases
-    for i in range(m + 1):
-        dp[i][0] = i
-    for j in range(n + 1):
-        dp[0][j] = j
-    
-    # Fill the DP table
-    for i in range(1, m + 1):
-        for j in range(1, n + 1):
-            if ref_words[i-1] == hyp_words[j-1]:
-                dp[i][j] = dp[i-1][j-1]
-            else:
-                dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
-    
-    # WER = edit_distance / reference_length
-    if len(ref_words) == 0:
-        return 0.0 if len(hyp_words) == 0 else 1.0
-    
-    return dp[m][n] / len(ref_words)
+
 
 def compare_whisper_models(url: str, output_dir: str, implementation: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -314,48 +224,18 @@ def compare_whisper_models(url: str, output_dir: str, implementation: Optional[s
         if implementation == "mlx" and model_size not in available_mlx_models:
             actual_implementation = "openai (fallback)"
         
-        # Store detailed results
+        # Store minimal results
         results[model_size] = {
             "success": success,
             "processing_time": processing_time,
             "transcript_text": transcript_text,
-            "word_count": len(transcript_text.split()) if transcript_text else 0,
-            "char_count": len(transcript_text) if transcript_text else 0,
-            "raw_result": result if success else None,
-            "srt_content": generate_srt_content(result) if success else "",
             "implementation_used": actual_implementation
         }
         
         print(f"  Processing time: {processing_time:.2f} seconds")
         print(f"  Success: {success}")
-        print(f"  Word count: {results[model_size]['word_count']}")
-        print(f"  Character count: {results[model_size]['char_count']}")
     
-    # Step 3: Calculate comparison metrics
-    print("\nStep 3: Calculating comparison metrics...")
-    print("="*60)
-    
-    # Use the largest successful model as reference for quality comparison
-    reference_model = None
-    for model in reversed(model_sizes):  # Start from largest
-        if results[model]["success"] and results[model]["transcript_text"]:
-            reference_model = model
-            break
-    
-    if reference_model:
-        reference_text = all_transcripts[reference_model]
-        print(f"Using {reference_model} model as reference for quality comparison")
-        
-        for model_size in model_sizes:
-            if results[model_size]["success"] and model_size != reference_model:
-                similarity = calculate_similarity(reference_text, all_transcripts[model_size])
-                wer = calculate_word_error_rate(reference_text, all_transcripts[model_size])
-                
-                results[model_size]["similarity_to_reference"] = similarity
-                results[model_size]["word_error_rate"] = wer
-            else:
-                results[model_size]["similarity_to_reference"] = 1.0 if model_size == reference_model else 0.0
-                results[model_size]["word_error_rate"] = 0.0 if model_size == reference_model else 1.0
+
     
     # Clean up temporary audio file
     try:
@@ -364,84 +244,33 @@ def compare_whisper_models(url: str, output_dir: str, implementation: Optional[s
     except OSError:
         print(f"\nWarning: Could not remove temporary file: {audio_path}")
     
-    # Create comparison summary
-    comparison_summary = {
-        "url": url,
-        "implementation": implementation,
-        "reference_model": reference_model,
-        "timestamp": datetime.now().isoformat(),
-        "models": results
-    }
-    
-    return comparison_summary
+    return results
 
-def print_comparison_report(comparison_data: Dict[str, Any]):
-    """Print a detailed comparison report to console."""
-    print("\n" + "="*60)
-    print("WHISPER MODEL COMPARISON REPORT")
-    print("="*60)
-    
-    print(f"URL: {comparison_data['url']}")
-    print(f"Implementation: {comparison_data['implementation']}")
-    print(f"Reference Model: {comparison_data['reference_model']}")
-    print(f"Timestamp: {comparison_data['timestamp']}")
-    
-    print("\n" + "-"*60)
-    print("PERFORMANCE COMPARISON")
-    print("-"*60)
+def print_timing_report(results: Dict[str, Any]):
+    """Print a simple timing report to console."""
+    print("\n" + "="*40)
+    print("PROCESSING TIME COMPARISON")
+    print("="*40)
     
     # Performance table header
-    print(f"{'Model':<8} {'Success':<8} {'Time(s)':<8} {'Similarity':<10} {'Implementation':<15}")
-    print("-"*60)
+    print(f"{'Model':<8} {'Success':<8} {'Time(s)':<8}")
+    print("-"*25)
     
-    for model_size, data in comparison_data['models'].items():
+    for model_size, data in results.items():
         success = "✓" if data['success'] else "✗"
         time_str = f"{data['processing_time']:.1f}" if data['success'] else "N/A"
-        similarity = f"{data.get('similarity_to_reference', 0):.3f}" if data['success'] else "N/A"
-        impl = data.get('implementation_used', 'unknown')
         
-        print(f"{model_size:<8} {success:<8} {time_str:<8} {similarity:<10} {impl:<15}")
-    
-    print("\n" + "-"*60)
-    print("SPEED vs ACCURACY ANALYSIS")
-    print("-"*60)
-    
-    successful_models = [(k, v) for k, v in comparison_data['models'].items() if v['success']]
-    if len(successful_models) > 1:
-        # Sort by processing time
-        by_speed = sorted(successful_models, key=lambda x: x[1]['processing_time'])
-        print(f"Fastest: {by_speed[0][0]} ({by_speed[0][1]['processing_time']:.1f}s)")
-        
-        # Sort by similarity (quality)
-        by_quality = sorted(successful_models, key=lambda x: x[1].get('similarity_to_reference', 0), reverse=True)
-        print(f"Highest Quality: {by_quality[0][0]} (similarity: {by_quality[0][1].get('similarity_to_reference', 0):.3f})")
-        
-        # Speed/Quality ratio (higher is better)
-        for model, data in successful_models:
-            if data['processing_time'] > 0:
-                quality_speed_ratio = data.get('similarity_to_reference', 0) / data['processing_time']
-                data['quality_speed_ratio'] = quality_speed_ratio
-        
-        by_ratio = sorted(successful_models, key=lambda x: x[1].get('quality_speed_ratio', 0), reverse=True)
-        print(f"Best Quality/Speed Ratio: {by_ratio[0][0]} (ratio: {by_ratio[0][1].get('quality_speed_ratio', 0):.4f})")
+        print(f"{model_size:<8} {success:<8} {time_str:<8}")
 
-def save_results(comparison_data: Dict[str, Any], output_dir: str):
-    """Save comparison results to files."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Save JSON report
-    json_path = os.path.join(output_dir, f"comparison_report_{timestamp}.json")
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(comparison_data, f, indent=2, ensure_ascii=False)
-    print(f"\nDetailed JSON report saved to: {json_path}")
-    
-    # Save individual SRT files
-    for model_size, data in comparison_data['models'].items():
-        if data['success'] and data['srt_content']:
-            srt_path = os.path.join(output_dir, f"transcription_{model_size}_{timestamp}.srt")
-            with open(srt_path, 'w', encoding='utf-8') as f:
-                f.write(data['srt_content'])
-            print(f"SRT file for {model_size} model saved to: {srt_path}")
+def save_text_files(results: Dict[str, Any], output_dir: str):
+    """Save transcription text files."""
+    # Save individual text files (simple names, overwritten each run)
+    for model_size, data in results.items():
+        if data['success'] and data['transcript_text']:
+            txt_path = os.path.join(output_dir, f"{model_size}.txt")
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(data['transcript_text'])
+            print(f"Text file for {model_size} model saved to: {txt_path}")
 
 def main():
     # Get the directory where this script is located
@@ -489,16 +318,16 @@ Examples:
     
     try:
         # Run comparison
-        comparison_data = compare_whisper_models(url, args.output, args.implementation)
+        results = compare_whisper_models(url, args.output, args.implementation)
         
-        # Print report unless quiet mode
+        # Print timing report unless quiet mode
         if not args.quiet:
-            print_comparison_report(comparison_data)
+            print_timing_report(results)
         
-        # Save results
-        save_results(comparison_data, args.output)
+        # Save text files
+        save_text_files(results, args.output)
         
-        print(f"\nComparison complete! Results saved to: {args.output}")
+        print(f"\nComparison complete! Text files saved to: {args.output}")
         
     except KeyboardInterrupt:
         print("\nComparison interrupted by user.")
