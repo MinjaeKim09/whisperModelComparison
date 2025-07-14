@@ -400,6 +400,10 @@ def save_results(comparison_data: Dict[str, Any], output_dir: str):
             print(f"SRT file for {model_size} model saved to: {srt_path}")
 
 def main():
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    default_output = os.path.join(script_dir, "results")
+    
     parser = argparse.ArgumentParser(
         description="Compare Whisper model sizes on YouTube video transcription",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -412,14 +416,18 @@ Examples:
         """
     )
     
-    parser.add_argument("--output", "-o", default="./results", 
-                       help="Output directory for results (default: ./results)")
+    parser.add_argument("--output", "-o", default=default_output, 
+                       help="Output directory for results (default: results/ in script directory)")
     parser.add_argument("--implementation", choices=["mlx", "openai"], 
                        help="Force specific Whisper implementation (auto-detect if not specified)")
     parser.add_argument("--quiet", "-q", action="store_true", 
                        help="Suppress detailed console output")
     
     args = parser.parse_args()
+    
+    # If user provided a relative path, make it relative to script directory
+    if not os.path.isabs(args.output):
+        args.output = os.path.join(script_dir, args.output)
     
     # Prompt user for YouTube URL
     print("Whisper Model Comparison Tool")
